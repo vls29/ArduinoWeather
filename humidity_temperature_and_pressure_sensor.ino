@@ -3,51 +3,41 @@
 ///////// CHANGEABLE VALUES /////////
 
 const int humiditySensorPin = A0;
-const double humidityVoltageSupply = 5.0;
 
 const int temperatureSensorPin = A1;
 const double baselineTemperature = 19.0;
 
 const int pressureSensorPin = A2;
-const double pressureVoltageSupply = 5.0;
 
+const bool trace = false;
 const bool debug = false;
 
 ///////// CHANGEABLE VALUES ABOVE /////////
 
-// humidity constants
-const double sensorMultiplier = 0.00636;
-const double sensorConstant = 0.1515;
-
-// temperature constants
-const double temperatureCompensationConstant = 1.0546;
-const double temperatureCompensationMultiplier = 0.00216;
+const double FIVE_VOLTS = 5.0;
+const double ANALOG_PIN_RANGE = 1023.0;
+const long READING_INCREMENT = 1L;
+const long ZERO_LONG = 0L;
+const double ZERO_DOUBLE = 0.0;
 
 // pressure constants
-const double pressureTempErrorNormal = 1.0;
-const double pressureError = 3.45;
+const double PRESSURE_TEMPERATURE_ERROR_FACTOR_NORMAL = 1.0;
 
-const double pressureCompensation1 = 0.004;
-const double pressureCompensation2 = 0.04;
-
-const double kpaToMillibarsMultiplier = 10.0;
+const double KPA_TO_MILLIBARS = 10.0;
 
 // counters
-long temperatureCounter = 0L;
+long loopCounter = 0L;
+
 double temperatureReadings = 0.0;
-
-long humidityCounter = 0L;
 double humidityReadings = 0.0;
-
-long pressureCounter = 0L;
 double pressureReadings = 0.0;
 
 // timings
-double minutesBetweenCalls = 0.5;
+const double minutesBetweenCalls = 0.5;
 
-unsigned long millisecondsPerMinute = 60000;
-unsigned long minutesInHour = 60;
-unsigned long timeBetweenCalls = minutesBetweenCalls * millisecondsPerMinute;
+const unsigned long millisecondsPerMinute = 60000;
+const unsigned long minutesInHour = 60;
+const unsigned long timeBetweenCalls = minutesBetweenCalls * millisecondsPerMinute;
 
 unsigned long lastTimeUploaded = millis();
 
@@ -56,23 +46,29 @@ void setup() {
 }
 
 void loop() {
-  double instantTemperature = getInstantTemperature();
-  getInstantHumidity(instantTemperature);
-  getInstantPressure(instantTemperature);
+  readInstantTemperatureSensorValue();
+  readInstantHumiditySensorValue();
+  readInstantPressureSensorValue();
+  
+  incrementLoopCounter();
 
   if (isTimeToUpload()) {
-     Serial.println("******************************************************");
-     getAverageTemperature();
-     getAverageHumidity();
-     getAveragePressure();
-     Serial.println("******************************************************");
+	 if(debug) {
+       Serial.println("******************************************************");
+	 }
+     double averageTemperature = calculateAverageTemperature();
+     double averageTemperatureCompensatedHumidity = calculateAverageTemperatureCompensatedHumidity(averageTemperature);
+     double averageTemperatureCompensatedPressure = calculateAverageTemperatureCompensatedPressure(averageTemperature);
+     if(debug) {
+       Serial.println("******************************************************");
+	 }
      
      resetAverageTemperature();
      resetAverageHumidity();
      resetAveragePressure();
+   
+   resetLoopCounter();
   }
-
-  //delay(1000);
 }
 
 boolean isTimeToUpload() {
@@ -86,113 +82,128 @@ boolean isTimeToUpload() {
   return false;
 }
 
-///////////////////////////////////////////////////////
-////////////////// Humidity functions /////////////////
-///////////////////////////////////////////////////////
-
-double getInstantHumidity(double instantTemperature) {
-  double sensorCalculation = humiditySensorCalculation();
-  if(debug) {
-    Serial.print("Humidity reading at 25c (not compensated): ");
-    Serial.println(sensorCalculation);
-  }
-
-  double temperatureCompensatedCaculation = humidityTemperatureCompensated(sensorCalculation, instantTemperature);
-  if(debug) {
-    Serial.print("Temperature compensated humidity: ");
-    Serial.println(temperatureCompensatedCaculation);
-  }
-
-  humidityReadings = humidityReadings + temperatureCompensatedCaculation;
-  humidityCounter = humidityCounter + 1L;
-
-  return temperatureCompensatedCaculation;
-}
-
-double getAverageHumidity() {
-  double averageValue = (double)humidityReadings/(double)humidityCounter;
-
-  Serial.print("Average Humidity: ");
-  Serial.println(averageValue);
-
-  return averageValue;
-}
-
-void resetAverageHumidity() {
-  humidityCounter = 0L;
-  humidityReadings = 0.0;
-}
-
-/**
- * From Honeywell: Vout = (Vsupply)(0.00636(Sensor RH) + 0.1515), typical at 25 deg. C
+/*
+ * Read from a 5V pin and multiply it up to it's true value.
  */
-double humiditySensorCalculation() {
-  //return (humidityVoltageSupply * ((sensorMultiplier * readHumiditySensor()) + sensorConstant));
-  //return (humidityVoltageSupply * (sensorMultiplier * (readHumiditySensor() + sensorConstant)));
-  double sensorVoltage = readHumiditySensor() * (humidityVoltageSupply / 1023.0);
+double read5VAnalogPin(const int pin) {
+  double sensorVal = analogRead(pin);
 
-  if(debug) {
-    Serial.print("humidity sensor voltage: ");
-    Serial.println(sensorVoltage);
+  if(trace) {
+    Serial.print("Raw pin '");
+    Serial.print(pin);
+  Serial.print("' sensor value: ");
+    Serial.println(sensorVal);
   }
-
-  return ((sensorVoltage / humidityVoltageSupply) - sensorConstant) / sensorMultiplier;
-}
-
-double readHumiditySensor() {
-  double sensorVal = analogRead(humiditySensorPin);
-
-  if(debug) {
-    Serial.print("humidity sensor value: ");
+  
+  sensorVal = sensorVal * (FIVE_VOLTS / ANALOG_PIN_RANGE);
+  
+  if(trace) {
+    Serial.print("Pin '");
+    Serial.print(pin);
+  Serial.print("' true value: ");
     Serial.println(sensorVal);
   }
 
   return sensorVal;
 }
 
-/**
- * From Honeywell: True RH = (Sensor RH)/(1.0546 - 0.00216T), T in deg. C
+void incrementLoopCounter() {
+  loopCounter = loopCounter + READING_INCREMENT;
+}
+
+void resetLoopCounter() {
+  if(debug) {
+      Serial.print("Loops completed ");
+      Serial.println(loopCounter);
+  }
+  
+  loopCounter = ZERO_LONG;
+}
+
+///////////////////////////////////////////////////////
+////////////////// Humidity functions /////////////////
+///////////////////////////////////////////////////////
+
+/*
+ * For efficiency reasons, the stored value is the relative uncompensated humidity.
+ * Difference in number of readings is staggering if too many calculations done on the arduino.
  */
-double humidityTemperatureCompensated(double sensorCalculation, double instantTemperature) {
-  //return (sensorCalculation / (temperatureCompensationConstant - (temperatureCompensationMultiplier * getAverageTemperature())));
-  return (sensorCalculation / (temperatureCompensationConstant - (temperatureCompensationMultiplier * instantTemperature)));
+void readInstantHumiditySensorValue() {
+  double humidity = read5VAnalogPin(humiditySensorPin);
+  if(trace) {
+    Serial.print("Humidity sensor value: ");
+    Serial.println(humidity);
+  }
+
+  humidityReadings = humidityReadings + humidity;
+}
+
+/**
+ * Calculates the average non-temperature compensated humidity first and then uses the value in the average temperature compensated humidity calculation.
+ * All the calculations are done here for efficiency.
+ */
+double calculateAverageTemperatureCompensatedHumidity(double averageTemperature) {
+  double averageNonCompensatedHumidity = (double)humidityReadings/(double)loopCounter;
+  
+  // From Honeywell: Vout = (Vsupply)(0.00636(Sensor RH) + 0.1515), typical at 25 deg. C
+  // Or written to calculate Relative Humidity: Relative Humidity = ((Vout / Vsupply) - 0.1515) / 0.00636, typical at 25 deg. C
+  double averageRelativeHumidity = ((averageNonCompensatedHumidity / FIVE_VOLTS) - 0.1515) / 0.00636;
+
+  // Temperature Compensated Relative Humidity = (Relative Humidity)/(1.0546 - 0.00216T), T in deg. C
+  double averageTemperatureCompensatedHumidity = (averageRelativeHumidity / (1.0546 - (0.00216 * averageTemperature)));
+  
+  if(debug) {
+    Serial.print("Average humidity sensor value: ");
+    Serial.println(averageNonCompensatedHumidity);
+    Serial.print("Average non-compensated humidity: ");
+    Serial.println(averageRelativeHumidity);
+    Serial.print("Temperature compensated humidity: ");
+    Serial.println(averageTemperatureCompensatedHumidity);
+  }
+  
+  return averageTemperatureCompensatedHumidity;
+}
+
+void resetAverageHumidity() {
+  humidityReadings = ZERO_DOUBLE;
 }
 
 ///////////////////////////////////////////////////////
 //////////////// Temperature functions ////////////////
 ///////////////////////////////////////////////////////
 
-double readTemperatureSensor() {
-  double voltage = ((double)analogRead(temperatureSensorPin) * (5.0 / 1023.0));
-  double temperature = ((voltage - 0.5) * 100.0);
-
-  if(debug) {
+void readInstantTemperatureSensorValue() {
+  double temperature = calculateInstantTemperature();
+  
+  if(trace) {
     Serial.print("temperature: ");
     Serial.println(temperature);
   }
+  
+  temperatureReadings = temperatureReadings + temperature;
+}
+
+double calculateInstantTemperature() {
+  double voltage = read5VAnalogPin(temperatureSensorPin);
+  double temperature = ((voltage - 0.5) * 100.0); // NEEDS CHECKING AS CANNOT FIND ANY DOCUMENTATION ON THIS FIGURE...
+
 
   return temperature;
 }
 
-double getInstantTemperature() {
-  double sensorVal = readTemperatureSensor();
-  temperatureReadings = temperatureReadings + sensorVal;
-  temperatureCounter = temperatureCounter + 1L;
-  return sensorVal;
-}
+double calculateAverageTemperature() {
+  double averageTemperature = temperatureReadings/(double)loopCounter;
 
-double getAverageTemperature() {
-  double averageValue = temperatureReadings/(double)temperatureCounter;
+  if(debug) {
+    Serial.print("Average Temperature: ");
+    Serial.println(averageTemperature);
+  }
 
-  Serial.print("Average Temperature: ");
-  Serial.println(averageValue);
-
-  return averageValue;
+  return averageTemperature;
 }
 
 void resetAverageTemperature() {
-  temperatureCounter = 0L;
-  temperatureReadings = 0.0;
+  temperatureReadings = ZERO_DOUBLE;
 }
 
 
@@ -200,55 +211,74 @@ void resetAverageTemperature() {
 ///////////////// Pressure functions //////////////////
 ///////////////////////////////////////////////////////
 
-double getInstantPressure(double instantTemperature) {
-  double sensorVal = readPressureSensor(instantTemperature);
-  pressureReadings = pressureReadings + sensorVal;
-  pressureCounter = pressureCounter + 1L;
-  return sensorVal;
+void readInstantPressureSensorValue() {
+  double uncompensatedPressure = read5VAnalogPin(pressureSensorPin);
+
+  if(trace) {
+    Serial.print("Uncompensated pressure: ");
+    Serial.println(uncompensatedPressure);
+  }
+  
+  pressureReadings = pressureReadings + uncompensatedPressure;
+}
+
+/**
+ * From the pressure sensor document:
+ * Vout = Vsupply * ((Pressure * 0.004) - 0.04) +- (Pressure Error * Temperature Factor * 0.004 x Vsupply)
+ *
+ * Calculate: Vout = Vsupply * ((Pressure * 0.004) - 0.04) using getErrorFactor(averageTemperature) for the error factor portion of the equation.
+ *
+ *
+ *
+ */
+double calculateAverageTemperatureCompensatedPressure(double averageTemperature) {
+  double averagePressure = (double)pressureReadings/(double)loopCounter;
+
+  double calculatedPressure = ((averagePressure / FIVE_VOLTS) + 0.04) / 0.004;
+  //pressure = (pressure - getErrorFactor(instantTemperature)) * kpaToMillibarsMultiplier;
+  calculatedPressure = calculatedPressure * KPA_TO_MILLIBARS;
+  
+  if(debug) {
+    Serial.print("Average pressure sensor reading: ");
+    Serial.println(averagePressure);
+    Serial.print("Calculated pressure: ");
+    Serial.println(calculatedPressure);
+  }
+
+  return calculatedPressure;
 }
 
 void resetAveragePressure() {
-  pressureCounter = 0L;
-  pressureReadings = 0.0;
+  pressureReadings = ZERO_DOUBLE;
 }
 
-double getAveragePressure() {
-  double averageValue = (double)pressureReadings/(double)pressureCounter;
-
-  Serial.print("Average Pressure: ");
-  Serial.println(averageValue);
-
-  return averageValue;
-}
-
-double readPressureSensor(double instantTemperature) {
-  double voltage = ((double)analogRead(pressureSensorPin) * (pressureVoltageSupply / 1023.0));
-
-  double pressure = ((voltage / pressureVoltageSupply) + pressureCompensation2) / pressureCompensation1;
-  pressure = (pressure - getErrorFactor(instantTemperature)) * kpaToMillibarsMultiplier;
-
-  if(debug) {
-    Serial.print("pressure: ");
-    Serial.println(pressure);
-  }
-
-  return pressure;
-}
-
+/**
+ * NOT IN USE
+ *
+ * Because the document is too vague on the +- values, cannot reliably use this error factor...
+ *
+ *
+ * From the pressure sensor document:
+ * Vout = Vsupply * ((Pressure * 0.004) - 0.04) +- (Pressure Error * Temperature Factor * 0.004 x Vsupply)
+ *
+ * This method calculates the Error Factor, which is: (Pressure Error * Temperature Factor * 0.004 x Vsupply).
+ *
+ * From the manual, the Pressure Error is a fixed +-3.45 kPa between 20 and 250kPa
+ */
 double getErrorFactor(double instantTemperature) {
-    double temperatureCompensation = pressureTempErrorNormal;
+    double temperatureCompensation = PRESSURE_TEMPERATURE_ERROR_FACTOR_NORMAL;
     if( instantTemperature < 0.0 || instantTemperature > 85.0)
     {
-      if(instantTemperature < 0.0)
-      {
-          double difference = instantTemperature - (instantTemperature*2);
-          temperatureCompensation = (difference * (2.0/40.0)) + 1.0;
-      } 
-      else {
-          double difference = instantTemperature - 85.0;
-          temperatureCompensation = (difference * (2.0/40.0)) + 1.0;
+    double difference = 0.0;
+      if(instantTemperature > 0.0)  {
+          difference = instantTemperature - 85.0;
+      } else {
+      // invert the negative number
+          difference = instantTemperature - (instantTemperature * 2.0);
       }
+    
+      temperatureCompensation = (difference * (2.0/40.0)) + 1.0;
     }
-    double errorFactor = (pressureError * temperatureCompensation * pressureCompensation1 * pressureVoltageSupply);
-    return errorFactor;
+  
+    return (3.45 * temperatureCompensation * 0.004 * FIVE_VOLTS);
 }
