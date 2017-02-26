@@ -13,7 +13,8 @@ const bool debug = false;
 
 ///////// CHANGEABLE VALUES ABOVE /////////
 
-const double FIVE_VOLTS = 5.0;
+// calibrated to the exact voltage on the ethernet arduino I'm using
+const double FIVE_VOLTS = 5.006;
 const double ANALOG_PIN_RANGE = 1023.0;
 const long READING_INCREMENT = 1L;
 const long ZERO_LONG = 0L;
