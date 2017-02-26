@@ -5,7 +5,6 @@
 const int humiditySensorPin = A0;
 
 const int temperatureSensorPin = A1;
-const double baselineTemperature = 19.0;
 
 const int pressureSensorPin = A2;
 
