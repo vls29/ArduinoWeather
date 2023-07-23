@@ -4,7 +4,8 @@
 ///////// CHANGEABLE VALUES /////////
 
 char pompeii[] = "192.168.0.16";
-int pompeiiPort = 80;
+int pompeiiPort = 28080;
+const int httpRequestDelay = 15;
 
 // the number determined to be "on" from the analogue pin
 unsigned int onState = 200;
@@ -20,9 +21,8 @@ long millisecondsBetweenCalls = 60000L;
 const int sensorPin = A0;
 
 EthernetClient pompeiiClient;
-byte mac[] = {
-  0x90, 0xA0, 0xDA, 0x0E, 0x9B, 0xE6};
-char pompeiiService[] = "/pvoutput-post-weather.php";
+byte mac[] = {0x90, 0xA0, 0xDA, 0x0E, 0x9B, 0xE6};
+char pompeiiService[] = "/weather";
 
 unsigned int windCircuitOnCount = 0;
 unsigned int windCircuitOnCountGust = 0;
@@ -30,8 +30,6 @@ unsigned int gustMaxCount = 0;
 unsigned int readCount = 0;
 
 boolean lastStatus = false;
-
-double millisecondsPerMinute = 60000.0;
 
 unsigned long lastTimeUploaded = millis();
 unsigned long previousTime = 0UL;
@@ -49,6 +47,7 @@ void setup()
 
 void connectToEthernet()
 {
+  unsigned long millisecondsPerMinute = 60000L;
   // attempt to connect to Wifi network:
   // start the Ethernet connection:
   if (Ethernet.begin(mac) == 0) {
@@ -184,38 +183,31 @@ void readAnemometer()
 }
 
 String getPostData() {
-  return "circ=" + anemometerCircumference + "&windOn=" + String(windCircuitOnCount) + "&gustMax=" + String(gustMaxCount);
+  return "{\"circ\":" + anemometerCircumference + ",\"windOn\":" + String(windCircuitOnCount) + ",\"gustMax\":" + String(gustMaxCount) + "}";
 }
 
 void sendResultsToPompeii() {
   Serial.println("sendResultsToPompeii");
 
   String postData = getPostData();
-  Serial.println("post data: " + postData);
+  Serial.println(postData);
 
   if (pompeiiClient.connect(pompeii, pompeiiPort)) {
     Serial.println("connected to pompeii");
     // Make a HTTP request:
-    pompeiiClient.print("POST ");
-    pompeiiClient.print(pompeiiService);
-    pompeiiClient.println(" HTTP/1.1");
-    pompeiiClient.print("Host: ");
-    pompeiiClient.print(pompeii);
-    pompeiiClient.print(":");
-    pompeiiClient.println(pompeiiPort);
-    pompeiiClient.println("Accept: text/html");
-    pompeiiClient.println("Content-Type: application/x-www-form-urlencoded; charset=UTF-8");
-    pompeiiClient.print("Content-Length: ");
-    pompeiiClient.println(postData.length());
+    pompeiiClient.println("POST " + String(pompeiiService) + " HTTP/1.1");
+    pompeiiClient.println("Host: " + String(pompeii) + ":" + pompeiiPort);
+    pompeiiClient.println("Content-Type: application/json");
+    pompeiiClient.println("Content-Length: " + String(postData.length()));
     pompeiiClient.println("Pragma: no-cache");
     pompeiiClient.println("Cache-Control: no-cache");
     pompeiiClient.println("Connection: close");
-    pompeiiClient.println("X-Data-Source: WEATHER");
     pompeiiClient.println();
 
     pompeiiClient.println(postData);
     pompeiiClient.println();
 
+    delay(httpRequestDelay);
     pompeiiClient.stop();
     pompeiiClient.flush();
     Serial.println("Called pompeii");
