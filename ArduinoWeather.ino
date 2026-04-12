@@ -10,15 +10,16 @@ const int httpRequestDelay = 15;
 // the number determined to be "on" from the analogue pin
 unsigned int onState = 200;
 
-double minutesBetweenCalls = 0.0167;
 String anemometerCircumference = String("0.5655");
-//double mpsToMphMultiplier = 2.2369;
 
 long millisecondsBetweenCalls = 60000L;
 
 ///////// CHANGEABLE VALUES ABOVE /////////
 
-const int sensorPin = A0;
+const int sensorPinAnemometer = A0;
+const int sensorPinWindVane = A1;
+
+const int sensorPinRainGauge = 2;
 
 EthernetClient ethernetClient;
 byte mac[] = {0x90, 0xA0, 0xDA, 0x0E, 0x9B, 0xE6};
@@ -27,9 +28,10 @@ char serviceEndpoint[] = "/weather";
 unsigned int windCircuitOnCount = 0;
 unsigned int windCircuitOnCountGust = 0;
 unsigned int gustMaxCount = 0;
-unsigned int readCount = 0;
 
-boolean lastStatus = false;
+unsigned int readCountAnemometer = 0;
+
+boolean anemometerLastStatus = false;
 
 unsigned long lastTimeUploaded = millis();
 unsigned long previousTime = 0UL;
@@ -39,10 +41,15 @@ unsigned long previousGustTime = 0UL;
 
 unsigned long gustPeriod = 1000UL;
 
+unsigned int windDirection = 0;
+volatile unsigned int rainCount = 0;
+
 void setup()
 {
   Serial.begin(9600);
   connectToEthernet();
+  attachInterrupts();
+  Serial.println("Setup complete");
 }
 
 void connectToEthernet()
@@ -68,19 +75,24 @@ void connectToEthernet()
   Serial.println(Ethernet.localIP());
 }
 
+void attachInterrupts()
+{
+  pinMode(sensorPinRainGauge, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(sensorPinRainGauge), rainGuageChange, RISING);
+}
+
 void loop()
 {
   readAnemometer();
   calculateGustSpeed();
 
   if (isTimeToUploadData()) {
+    readWindVane();
     Serial.println("Uploading data");
     sendResultsToServer();
 
     resetFlags();
   }
-
-  delay(1);
 }
 
 void resetFlags()
@@ -88,7 +100,8 @@ void resetFlags()
   windCircuitOnCount = 0;
   windCircuitOnCountGust = 0;
   gustMaxCount = 0;
-  readCount = 0;
+  readCountAnemometer = 0;
+  rainCount = 0;
 }
 
 void calculateGustSpeed() {
@@ -140,23 +153,35 @@ boolean isTimeToUploadData() {
 
 void readAnemometer()
 {
-  readCount++;
+  readCountAnemometer++;
 
-  int sensorVal = analogRead(sensorPin);
+  int sensorVal = analogRead(sensorPinAnemometer);
 
   if( sensorVal > onState) {
-    if( !lastStatus ) {
+    if( !anemometerLastStatus ) {
       windCircuitOnCount++;
-      lastStatus = true;
+      anemometerLastStatus = true;
     }
   } 
   else {
-    lastStatus = false;
+    anemometerLastStatus = false;
   }
 }
 
+void readWindVane() {
+  int sensorVal = analogRead(sensorPinWindVane);
+  //Serial.print("Wind vane sensor value: ");
+  //Serial.println(sensorVal);
+  windDirection = sensorVal;
+}
+
+void rainGuageChange() {
+  rainCount++;
+  //Serial.println("Rain gauge change detected. Total count: " + String(rainCount));
+}
+
 String getPostData() {
-  return "{\"circ\":" + anemometerCircumference + ",\"windOn\":" + String(windCircuitOnCount) + ",\"gustMax\":" + String(gustMaxCount) + "}";
+  return "{\"circ\":" + anemometerCircumference + ",\"windOn\":" + String(windCircuitOnCount) + ",\"gustMax\":" + String(gustMaxCount) + ",\"direction\":" + String(windDirection) + ",\"rainCount\":" + String(rainCount) + "}";
 }
 
 void sendResultsToServer() {
